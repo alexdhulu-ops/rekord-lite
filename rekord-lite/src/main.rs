@@ -66,9 +66,24 @@ fn main() {
 
     // Create the PIONEER/USBANLZ directory structure
     let usbanlz_dir = out_path.join("PIONEER").join("USBANLZ");
+    let rekordbox_dir = out_path.join("PIONEER").join("rekordbox");
+
     if let Err(e) = fs::create_dir_all(&usbanlz_dir) {
         eprintln!("Error: Could not create output directory structure: {}", e);
         return;
+    }
+
+    if let Err(e) = fs::create_dir_all(&rekordbox_dir) {
+        eprintln!("Error: Could not create rekordbox directory structure: {}", e);
+        return;
+    }
+
+    // Create a stub DeviceSQL database file
+    let pdb_path = rekordbox_dir.join("export.pdb");
+    if !pdb_path.exists() {
+        if let Ok(mut f) = fs::File::create(&pdb_path) {
+            f.write_all(b"STUB_DEVICE_SQL_DATABASE_TEMPLATE").ok();
+        }
     }
 
     println!("Scanning directory: {}", args.dir);
