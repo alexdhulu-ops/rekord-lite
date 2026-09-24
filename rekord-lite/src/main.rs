@@ -8,6 +8,7 @@ use symphonia::core::meta::{MetadataOptions, StandardTagKey};
 use symphonia::core::probe::Hint;
 use walkdir::WalkDir;
 use aubio::{OnsetMode, Tempo};
+use biquad::*;
 
 /// rekord-lite: A tool to export music for Pioneer XDJ-XZ
 #[derive(Parser, Debug)]
@@ -111,9 +112,27 @@ fn process_file(path: &Path) {
     let sample_rate = track.codec_params.sample_rate.unwrap_or(44100);
 
     // Audio Analysis & BPM Setup
-    let win_size = 1024;
+    // Increase window and hop size for better stability in electronic music tempo extraction
+    let win_size = 2048;
     let hop_size = 512;
+    // SpecFlux is good, but Energy often works well when paired with Low Pass filter
     let mut tempo = Tempo::new(OnsetMode::SpecFlux, win_size, hop_size, sample_rate).unwrap();
+
+    // Biquad Low Pass Filter setup to isolate the kicks (e.g. < 200 Hz)
+    let f0 = 200.0.hz();
+    let fs = (sample_rate as f32).hz();
+    // Quality factor for Butterworth
+    let q_value = Q_BUTTERWORTH_F32;
+
+    let coeffs = match Coefficients::<f32>::from_params(Type::LowPass, fs, f0, q_value) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("  -> Failed to create filter coeffs: {:?}", e);
+            return;
+        }
+    };
+
+    let mut filter = DirectForm1::<f32>::new(coeffs);
 
     let mut total_rms = 0.0;
     let mut total_peak = 0.0;
@@ -128,7 +147,6 @@ fn process_file(path: &Path) {
                 unimplemented!();
             }
             Err(Error::IoError(_)) => {
-                // EOF.
                 break;
             }
             Err(err) => {
@@ -156,15 +174,20 @@ fn process_file(path: &Path) {
                 let mut local_rms_sq = 0.0;
                 let mut local_peak = 0.0_f32;
 
-                // Process mono / left channel for BPM and analysis for simplicity
+                // Process mono / left channel for BPM and analysis
                 for chunk in samples.chunks(channels) {
                     let s = chunk[0];
+
+                    // Original sample is used for RMS and peak calculations
                     local_rms_sq += (s * s) as f64;
                     if s.abs() > local_peak {
                         local_peak = s.abs();
                     }
 
-                    aubio_buffer.push(s);
+                    // Filtered sample is sent to the BPM detection logic
+                    let filtered_s = filter.run(s);
+                    aubio_buffer.push(filtered_s);
+
                     if aubio_buffer.len() >= hop_size {
                         tempo.do_result(aubio_buffer.as_slice()).unwrap();
                         aubio_buffer.clear();
@@ -192,8 +215,23 @@ fn process_file(path: &Path) {
     if blocks > 0 {
         let avg_rms = total_rms / blocks as f64;
         let avg_peak = total_peak / blocks as f64;
-        println!("  -> Audio Analysis: Avg RMS: {:.4}, Avg Peak: {:.4}", avg_rms, avg_peak);
-        println!("  -> BPM: {:.2}", tempo.get_bpm());
-    }
 
+        // Final smoothing for BPM (e.g. restrict logical bounds and round)
+        let mut raw_bpm = tempo.get_bpm();
+
+        // Simple logic for doubling/halving if it detects out of bounds (100 to 200 BPM safely)
+        if raw_bpm > 0.0 {
+            while raw_bpm < 100.0 {
+                raw_bpm *= 2.0;
+            }
+            while raw_bpm >= 200.0 {
+                raw_bpm /= 2.0;
+            }
+        }
+
+        let rounded_bpm = raw_bpm.round();
+
+        println!("  -> Audio Analysis: Avg RMS: {:.4}, Avg Peak: {:.4}", avg_rms, avg_peak);
+        println!("  -> BPM: {:.1} (raw: {:.3})", rounded_bpm, raw_bpm);
+    }
 }
