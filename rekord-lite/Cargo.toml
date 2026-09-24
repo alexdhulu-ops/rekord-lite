@@ -11,3 +11,5 @@ walkdir = "2.5"
 symphonia = { version = "0.5", features = ["all"] }
 aubio = "0.2.1"
 biquad = "0.6.0"
+modular-bitfield = "0.13.1"
+binrw = "0.15.2"
