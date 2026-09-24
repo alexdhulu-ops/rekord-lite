@@ -1,0 +1,13 @@
+[package]
+name = "rekord-lite"
+version = "0.1.0"
+edition = "2021"
+authors = ["Jules"]
+description = "A CLI tool to export music for Pioneer XDJ-XZ"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+walkdir = "2.5"
+symphonia = { version = "0.5", features = ["all"] }
+aubio = "0.2.1"
+biquad = "0.6.0"
